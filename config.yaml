@@ -1,0 +1,23 @@
+clusters:
+  - dev-cluster-1
+  - dev-cluster-2
+  - dev-cluster-3
+  - dev-cluster-4
+  - dev-cluster-5
+  - test-cluster-1
+  - test-cluster-2
+  - test-cluster-3
+  - test-cluster-4
+  - test-cluster-5
+  - prod-cluster-1
+  - prod-cluster-2
+  - prod-cluster-3
+  - prod-cluster-4
+  - prod-cluster-5
+
+actions:
+  - grafana
+  - cbcd-argocd
+  - server-argocd
+  - console
+  - login
