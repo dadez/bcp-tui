@@ -10,6 +10,7 @@ import (
 
 	"github/dadez/bcp-tui/config"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -76,6 +77,24 @@ type Model struct {
 	finalOutput string
 }
 
+func customKeyMap() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap() // gives you the default keymap struct
+
+	// Override only SelectAll for MultiSelect → Shift+A
+	km.MultiSelect.SelectAll = key.NewBinding(
+		key.WithKeys("A"), // Shift+A
+		key.WithHelp("shift+a", "select all"),
+	)
+
+	// (Optional) change SelectNone too (example: Shift+N)
+	km.MultiSelect.SelectNone = key.NewBinding(
+		key.WithKeys("A"),
+		key.WithHelp("shift+a", "select none"),
+	)
+
+	return km
+}
+
 func NewModel() Model {
 	m := Model{width: maxWidth}
 	m.lg = lipgloss.DefaultRenderer()
@@ -114,6 +133,7 @@ func NewModel() Model {
 		WithWidth(45).
 		// INFO: not sure what thid does
 		WithShowHelp(true).
+		WithKeyMap(customKeyMap()).
 		WithShowErrors(true)
 
 	return m
