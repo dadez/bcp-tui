@@ -1,11 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 
 	"github/dadez/bcp-tui/config"
@@ -70,6 +70,8 @@ type Model struct {
 	lg          *lipgloss.Renderer
 	styles      *Styles
 	clusters    []string
+	action      string
+	command     string
 	form        *huh.Form
 	width       int
 	finalOutput string
@@ -89,13 +91,22 @@ func NewModel() Model {
 	}
 
 	actions := config.AppConfig.Actions
-	actionsOpts := make([]huh.Option[string], 0, len(actions))
+	actionOpts := make([]huh.Option[string], 0, len(actions))
 	for _, action := range actions {
-		actionsOpts = append(actionsOpts, huh.NewOption(action, action))
+		actionOpts = append(actionOpts, huh.NewOption(action, action))
 	}
 
-	// per default, activate yes box in confirmation
-	done := true
+	commands := config.AppConfig.Commands
+	commandsOpts := make([]huh.Option[string], 0, len(commands))
+	for _, command := range commands {
+		commandsOpts = append(commandsOpts, huh.NewOption(command.Name, command.Command))
+	}
+
+	urls := config.AppConfig.Urls
+	urlOpts := make([]huh.Option[string], 0, len(urls))
+	for _, url := range urls {
+		urlOpts = append(urlOpts, huh.NewOption(url.Name, url.URL))
+	}
 
 	m.form = huh.NewForm(
 		huh.NewGroup(
@@ -109,22 +120,26 @@ func NewModel() Model {
 
 			huh.NewSelect[string]().
 				Key("action").
-				Options(actionsOpts...).
+				Value(&m.action).
+				Options(actionOpts...).
 				Title("Choose your action").
 				Description("This will determine the action"),
 
-			huh.NewConfirm().
-				Key("done").
-				Title("All done?").
-				Value(&done).
-				Validate(func(v bool) error {
-					if !v {
-						return fmt.Errorf("finish before exiting")
+			huh.NewSelect[string]().
+				Key("command").
+				Value(&m.command).
+				OptionsFunc(func() []huh.Option[string] {
+					switch m.action {
+					case "command":
+						return commandsOpts
+					case "browse":
+						return urlOpts
+					default:
+						return urlOpts
 					}
-					return nil
-				}).
-				Affirmative("Yep").
-				Negative("Wait, no"),
+				}, &m.action).
+				Title("Choose your command").
+				Description("This will determine the command or target"),
 		),
 	).
 		WithWidth(45).
@@ -146,65 +161,58 @@ func min(x, y int) int {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.done {
-		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			if msg.String() == "q" || msg.String() == "enter" {
-				return m, tea.Quit
-			}
-		}
-	}
 	switch msg := msg.(type) {
+
+	// Handle window resizing
 	case tea.WindowSizeMsg:
 		m.width = min(msg.Width, maxWidth) - m.styles.Base.GetHorizontalFrameSize()
+
 	case tea.KeyMsg:
 		switch msg.String() {
+
+		// Quit
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		// Move back one field
 		case "esc":
-			if m.form.State != huh.StateCompleted {
-				m.form.PrevField()
-				m.done = false
-			}
+			m.form.PrevField()
 			return m, nil
+
+		// Trigger action on Enter
+		case "enter":
+			// If we're on the action field, run the action
+			if m.form.Get("action") != nil {
+				if m.form.Get("command") != nil {
+					// Capture selected clusters
+					if raw := m.form.Get("cluster"); raw != nil {
+						if v, ok := raw.([]string); ok {
+							m.clusters = v
+						}
+					}
+					m.runOnCluster() // populates m.finalOutput
+					return m, nil
+				}
+			}
 		}
 	}
 
-	// Process the form
+	// Continue form updates
 	form, cmd := m.form.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
 		m.form = f
 	}
-
-	// When done, manually commit the MultiSelect if it’s still active
-	if m.form.State == huh.StateCompleted && !m.done {
-		if !m.done {
-			// Force read from the form's MultiSelect value
-			if raw := m.form.Get("cluster"); raw != nil {
-				if v, ok := raw.([]string); ok {
-					m.clusters = v // populate bound slice
-				}
-			}
-			m.openCluster()
-			m.done = true
-
-		}
-		// do no quit immediately for allow display of command output
-		// return m, tea.Quit
-		return m, nil
-	}
-
 	return m, cmd
 }
 
 func (m Model) View() string {
 	s := m.styles
 
-	// Form (left side)
+	// 1. Left-side form (always visible)
 	formView := strings.TrimSuffix(m.form.View(), "\n\n")
 	form := m.lg.NewStyle().Margin(1, 0).Render(formView)
 
-	// Default status content (clusters + action)
+	// 2. Middle status (always visible)
 	var selected string
 	if raw := m.form.Get("cluster"); raw != nil {
 		if v, ok := raw.([]string); ok {
@@ -212,41 +220,53 @@ func (m Model) View() string {
 		}
 	}
 	action := m.form.GetString("action")
-	statusContent := s.StatusHeader.Render("Cluster(s)") + "\n" + selected + "\n" + s.StatusHeader.Render("Action: ") + "\n" + action
+	command := m.form.GetString("command")
 
-	// Completed output content
-	completedContent := s.StatusHeader.Render("Output") + "\n" + m.finalOutput // always include header
+	statusContent := s.StatusHeader.Render(
+		"Cluster(s)") + "\n" + selected + "\n" + "Action: " + action + "\n" + "Command: " + command
 
-	// Compute max height
-	formHeight := lipgloss.Height(form)
-	statusHeight := lipgloss.Height(statusContent)
-	completedHeight := lipgloss.Height(completedContent)
-	maxHeight := formHeight
-	if statusHeight > maxHeight {
-		maxHeight = statusHeight
-	}
-	if completedHeight > maxHeight {
-		maxHeight = completedHeight
+	// 3. Right-side completed output (only shown if needed)
+	completedBox := ""
+	if m.finalOutput != "" {
+		completedContent := s.StatusHeader.Render("Output") + "\n" + m.finalOutput
+		completedBox = s.Status.Width(maxWidth).Render(completedContent)
 	}
 
-	// Render all boxes with same height
-	statusBox := s.Status.Height(maxHeight).Width(28).Render(statusContent)
-	completedBox := s.Status.Height(maxHeight).Width(40).Render(completedContent)
+	// Compute heights
+	formH := lipgloss.Height(form)
+	statusH := lipgloss.Height(statusContent)
+	outputH := lipgloss.Height(m.finalOutput)
+	maxH := formH
+	if statusH > maxH {
+		maxH = statusH
+	}
+	if outputH > maxH {
+		maxH = outputH
+	}
 
-	// Spacer for separation
+	statusBox := s.Status.Width(28).Height(maxH).Render(statusContent)
+	if completedBox != "" {
+		completedBox = s.Status.Width(maxWidth).Height(maxH).Render(
+			s.StatusHeader.Render("Output") + "\n" + m.finalOutput,
+		)
+	}
+
 	spacer := lipgloss.NewStyle().Width(2).Render(" ")
+	body := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		form,
+		spacer,
+		statusBox,
+		spacer,
+		completedBox,
+	)
 
-	// Join horizontally (Top alignment)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, form, spacer, statusBox, spacer, completedBox)
-
-	// Header
+	// header + footer same as before
 	errors := m.form.Errors()
 	header := m.appBoundaryView("BCP tui")
 	if len(errors) > 0 {
 		header = m.appErrorBoundaryView(m.errorView())
 	}
-
-	// Footer (help)
 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
 	if len(errors) > 0 {
 		footer = m.appErrorBoundaryView("")
@@ -254,218 +274,6 @@ func (m Model) View() string {
 
 	return s.Base.Render(header + "\n" + body + "\n\n" + footer)
 }
-
-// func (m Model) View() string {
-// 	s := m.styles
-//
-// 	// Form (left side)
-// 	formView := strings.TrimSuffix(m.form.View(), "\n\n")
-// 	form := m.lg.NewStyle().Margin(1, 0).Render(formView)
-//
-// 	// Default status content
-// 	var selected string
-// 	if raw := m.form.Get("cluster"); raw != nil {
-// 		if v, ok := raw.([]string); ok {
-// 			selected = strings.Join(v, "  \n")
-// 		}
-// 	}
-// 	action := m.form.GetString("action")
-// 	statusContent := s.StatusHeader.Render("Cluster(s)") + "\n" + selected + "\n" + "Action: " + action
-//
-// 	// Completed output content
-// 	completedContent := ""
-// 	if m.finalOutput != "" {
-// 		completedContent = s.StatusHeader.Render("Output") + "\n" + m.finalOutput
-// 	}
-//
-// 	// Compute max height to align all boxes
-// 	formHeight := lipgloss.Height(form)
-// 	statusHeight := lipgloss.Height(statusContent)
-// 	completedHeight := lipgloss.Height(completedContent)
-// 	maxHeight := formHeight
-// 	if statusHeight > maxHeight {
-// 		maxHeight = statusHeight
-// 	}
-// 	if completedHeight > maxHeight {
-// 		maxHeight = completedHeight
-// 	}
-//
-// 	// Render status and completed boxes with consistent height
-// 	statusBox := s.Status.
-// 		Height(maxHeight).
-// 		Width(28).
-// 		Render(statusContent)
-//
-// 	completedBox := ""
-// 	if completedContent != "" {
-// 		completedBox = s.Status.
-// 			Height(maxHeight).
-// 			Width(40).
-// 			Render(completedContent)
-// 	}
-//
-// 	// Spacer for separation
-// 	spacer := lipgloss.NewStyle().Width(2).Render(" ")
-//
-// 	// Join boxes horizontally (Top alignment)
-// 	body := lipgloss.JoinHorizontal(lipgloss.Top, form, spacer, statusBox, spacer, completedBox)
-//
-// 	// Header
-// 	errors := m.form.Errors()
-// 	header := m.appBoundaryView("BCP tui")
-// 	if len(errors) > 0 {
-// 		header = m.appErrorBoundaryView(m.errorView())
-// 	}
-//
-// 	// Footer (help)
-// 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
-// 	if len(errors) > 0 {
-// 		footer = m.appErrorBoundaryView("")
-// 	}
-//
-// 	return s.Base.Render(header + "\n" + body + "\n\n" + footer)
-// }
-
-// func (m Model) View() string {
-// 	s := m.styles
-//
-// 	// Form (left side)
-// 	formView := strings.TrimSuffix(m.form.View(), "\n\n")
-// 	form := m.lg.NewStyle().Margin(1, 0).Render(formView)
-//
-// 	// Default status box (middle/right)
-// 	var statusBox string
-// 	{
-// 		var selected string
-// 		if raw := m.form.Get("cluster"); raw != nil {
-// 			if v, ok := raw.([]string); ok {
-// 				selected = strings.Join(v, "  \n")
-// 			}
-// 		}
-// 		action := m.form.GetString("action")
-// 		statusContent := s.StatusHeader.Render("Cluster(s)") + "\n" + selected + "\n" + "Action: " + action
-//
-// 		const statusWidth = 28
-// 		statusMarginLeft := 1
-// 		statusBox = s.Status.
-// 			Height(lipgloss.Height(form)).
-// 			Width(statusWidth).
-// 			MarginLeft(statusMarginLeft).
-// 			Render(statusContent)
-// 	}
-//
-// 	// Completed output box (far right)
-// 	var completedBox string
-// 	if m.finalOutput != "" {
-// 		const completedWidth = 40
-// 		completedBox = s.Status.
-// 			Height(lipgloss.Height(form)).
-// 			Width(completedWidth).
-// 			MarginLeft(1).
-// 			Render(s.StatusHeader.Render("Output") + "\n" + m.finalOutput)
-// 	}
-//
-// 	// Combine all boxes horizontally
-// 	body := lipgloss.JoinHorizontal(lipgloss.Left, form, statusBox, completedBox)
-//
-// 	// Header
-// 	errors := m.form.Errors()
-// 	header := m.appBoundaryView("BCP tui")
-// 	if len(errors) > 0 {
-// 		header = m.appErrorBoundaryView(m.errorView())
-// 	}
-//
-// 	// Footer (help)
-// 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
-// 	if len(errors) > 0 {
-// 		footer = m.appErrorBoundaryView("")
-// 	}
-//
-// 	return s.Base.Render(header + "\n" + body + "\n\n" + footer)
-// }
-
-// func (m Model) View() string {
-// 	s := m.styles
-//
-// 	switch m.form.State {
-// 	case huh.StateCompleted:
-// 		if m.finalOutput != "" {
-// 			return m.styles.Status.Padding(1, 2).Width(60).Render(m.finalOutput)
-// 		}
-//
-// 		var b strings.Builder
-//
-// 		action := m.form.GetString("action")
-// 		if action == "" {
-// 			fmt.Fprintf(&b, "No action was selected!\n")
-// 			return b.String()
-// 		}
-//
-// 		fmt.Fprintf(&b, "Action: %s\n", action)
-// 		fmt.Fprintf(&b, "Selected actions:\n")
-//
-// 		// for _, cluster := range m.clusters {
-// 		for _, cluster := range config.AppConfig.Clusters {
-// 			switch action {
-// 			case "login":
-// 				fmt.Fprintf(&b, "login on %s\n", cluster)
-// 			default:
-// 				url := fmt.Sprintf("https://%s.%s.example.com", action, cluster)
-// 				fmt.Fprintf(&b, "open %s\n", url)
-// 			}
-// 		}
-//
-// 		return s.Status.Padding(1, 2).Width(48).Render(b.String())
-//
-// 	default:
-//
-// 		// Form (left side)
-// 		v := strings.TrimSuffix(m.form.View(), "\n\n")
-// 		form := m.lg.NewStyle().Margin(1, 0).Render(v)
-//
-// 		// Status (right side)
-// 		var status string
-// 		{
-// 			var action string
-// 			if m.form.GetString("action") != "" {
-// 				action = "action: " + m.form.GetString("action")
-// 			}
-//
-// 			var selected string
-// 			if raw := m.form.Get("cluster"); raw != nil {
-// 				if v, ok := raw.([]string); ok {
-// 					selected = strings.Join(v, "  \n")
-// 				}
-// 			}
-//
-// 			const statusWidth = 28
-// 			statusMarginLeft := m.width - statusWidth - lipgloss.Width(form) - s.Status.GetMarginRight()
-// 			status = s.Status.
-// 				Height(lipgloss.Height(form)).
-// 				Width(statusWidth).
-// 				MarginLeft(statusMarginLeft).
-// 				Render(
-// 					s.StatusHeader.Render("Cluster(s)") + "\n" +
-// 						selected + "\n" +
-// 						action,
-// 				)
-// 		}
-//
-// 		errors := m.form.Errors()
-// 		header := m.appBoundaryView("BCP tui")
-// 		if len(errors) > 0 {
-// 			header = m.appErrorBoundaryView(m.errorView())
-// 		}
-// 		body := lipgloss.JoinHorizontal(lipgloss.Left, form, status)
-//
-// 		footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
-// 		if len(errors) > 0 {
-// 			footer = m.appErrorBoundaryView("")
-// 		}
-//
-// 		return s.Base.Render(header + "\n" + body + "\n\n" + footer)
-// 	}
-// }
 
 func (m Model) errorView() string {
 	var s string
@@ -495,58 +303,42 @@ func (m Model) appErrorBoundaryView(text string) string {
 	)
 }
 
-func openURL(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		return
-	}
-	cmd.Start()
-}
-
-func (m *Model) runOcLogin(cluster string) {
-	cmd := exec.Command("oc", "login", cluster)
-
-	out, err := cmd.CombinedOutput() // <-- CRUCIAL
-	if err != nil {
-		// Store stderr/stdout (+ error) for display in the View
-		m.finalOutput = fmt.Sprintf(
-			"Failed to run oc login for %s:\n%s\nError: %v",
-			cluster,
-			string(out),
-			err,
-		)
-		return
-	}
-
-	// If it worked (or oc exists), you still show what's returned
-	m.finalOutput = fmt.Sprintf("Login OK for %s:\n%s", cluster, string(out))
-}
-
-func (m *Model) openCluster() {
-	action := m.form.GetString("action")
+func (m *Model) runOnCluster() {
+	command := m.form.GetString("command")
+	m.finalOutput = ""
 
 	for _, cluster := range m.clusters {
-		switch action {
-		case "login":
-			m.runOcLogin(cluster)
-		default:
-			url := fmt.Sprintf("https://%s.%s.example.com", action, cluster)
-			openURL(url)
+		c := fmt.Sprintf(command, cluster)
+		parts := strings.Fields(c)
+		cmd := exec.Command(parts[0], parts[1:]...)
+		out, err := cmd.CombinedOutput() // <-- CRUCIAL
+		if err != nil {
+			errorHeader := m.styles.ErrorHeaderText.Render("Command failed")
+			m.finalOutput += fmt.Sprintf(
+				"%s\n Failed to run command %s with args %s for cluster %s:\n%s\nError: %v\n\n",
+				errorHeader,
+				cmd.Path,
+				cmd.Args,
+				cluster,
+				string(out),
+				err,
+			)
+			continue
 		}
+		// If it worked (or oc exists), you still show what's returned
+		m.finalOutput += fmt.Sprintf("Command OK for %s:\n%s\n", cluster, string(out))
 	}
 }
 
 func main() {
-	if err := config.Load("config.yaml"); err != nil {
+	// configuration
+	configPath := flag.String("c", "config.yaml", "Path to config file")
+	flag.Parse()
+	if err := config.Load(*configPath); err != nil {
 		log.Fatal(err)
 	}
+
+	// build form
 	_, err := tea.NewProgram(NewModel()).Run()
 	if err != nil {
 		fmt.Println("Oh no:", err)
