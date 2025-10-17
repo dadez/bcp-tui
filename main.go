@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const maxWidth = 80
+const maxWidth = 130
 
 var (
 	red    = lipgloss.AdaptiveColor{Light: "#FE5F86", Dark: "#FE5F86"}
@@ -70,12 +70,10 @@ type Model struct {
 	lg          *lipgloss.Renderer
 	styles      *Styles
 	clusters    []string
-	action      string
 	command     string
 	form        *huh.Form
 	width       int
 	finalOutput string
-	done        bool
 }
 
 func NewModel() Model {
@@ -83,17 +81,10 @@ func NewModel() Model {
 	m.lg = lipgloss.DefaultRenderer()
 	m.styles = NewStyles(m.lg)
 
-	// clusters := []string{"dev-cluster-1", "prod-cluster-2", "staging-cluster-3", "test-cluster-4", "demo-cluster-5"}
 	clusters := config.AppConfig.Clusters
-	opts := make([]huh.Option[string], 0, len(clusters))
+	clusterOpts := make([]huh.Option[string], 0, len(clusters))
 	for _, cluster := range clusters {
-		opts = append(opts, huh.NewOption(cluster, cluster))
-	}
-
-	actions := config.AppConfig.Actions
-	actionOpts := make([]huh.Option[string], 0, len(actions))
-	for _, action := range actions {
-		actionOpts = append(actionOpts, huh.NewOption(action, action))
+		clusterOpts = append(clusterOpts, huh.NewOption(cluster, cluster))
 	}
 
 	commands := config.AppConfig.Commands
@@ -102,49 +93,28 @@ func NewModel() Model {
 		commandsOpts = append(commandsOpts, huh.NewOption(command.Name, command.Command))
 	}
 
-	urls := config.AppConfig.Urls
-	urlOpts := make([]huh.Option[string], 0, len(urls))
-	for _, url := range urls {
-		urlOpts = append(urlOpts, huh.NewOption(url.Name, url.URL))
-	}
-
 	m.form = huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Key("cluster").
-				Options(opts...).
+				Options(clusterOpts...).
 				Title("Choose your cluster").
-				Description("Action will be performed on this cluster(s)").
+				Description("Select cluster(s) bellow").
 				Filterable(true).
 				Value(&m.clusters),
 
 			huh.NewSelect[string]().
-				Key("action").
-				Value(&m.action).
-				Options(actionOpts...).
-				Title("Choose your action").
-				Description("This will determine the action"),
-
-			huh.NewSelect[string]().
 				Key("command").
 				Value(&m.command).
-				OptionsFunc(func() []huh.Option[string] {
-					switch m.action {
-					case "command":
-						return commandsOpts
-					case "browse":
-						return urlOpts
-					default:
-						return urlOpts
-					}
-				}, &m.action).
-				Title("Choose your command").
-				Description("This will determine the command or target"),
+				Options(commandsOpts...).
+				Title("Choose your action").
+				Description("This will determine the action"),
 		),
 	).
 		WithWidth(45).
-		WithShowHelp(false).
-		WithShowErrors(false)
+		// INFO: not sure what thid does
+		WithShowHelp(true).
+		WithShowErrors(true)
 
 	return m
 }
@@ -181,18 +151,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Trigger action on Enter
 		case "enter":
-			// If we're on the action field, run the action
-			if m.form.Get("action") != nil {
-				if m.form.Get("command") != nil {
-					// Capture selected clusters
-					if raw := m.form.Get("cluster"); raw != nil {
-						if v, ok := raw.([]string); ok {
-							m.clusters = v
-						}
+			if m.form.Get("command") != nil {
+				// Capture selected clusters
+				if raw := m.form.Get("cluster"); raw != nil {
+					if v, ok := raw.([]string); ok {
+						m.clusters = v
 					}
-					m.runOnCluster() // populates m.finalOutput
-					return m, nil
 				}
+				m.runOnCluster() // populates m.finalOutput
+				return m, nil
 			}
 		}
 	}
@@ -219,34 +186,29 @@ func (m Model) View() string {
 			selected = strings.Join(v, "  \n")
 		}
 	}
-	action := m.form.GetString("action")
 	command := m.form.GetString("command")
 
 	statusContent := s.StatusHeader.Render(
-		"Cluster(s)") + "\n" + selected + "\n" + "Action: " + action + "\n" + "Command: " + command
+		"Build") + "\n" + "Cluster(s):" + "\n" + selected + "\n\n" + "Command:" + "\n" + command
 
-	// 3. Right-side completed output (only shown if needed)
-	completedBox := ""
-	if m.finalOutput != "" {
-		completedContent := s.StatusHeader.Render("Output") + "\n" + m.finalOutput
-		completedBox = s.Status.Width(maxWidth).Render(completedContent)
-	}
+	// 3. Right-side completed output (only shown on output)
 
 	// Compute heights
 	formH := lipgloss.Height(form)
 	statusH := lipgloss.Height(statusContent)
 	outputH := lipgloss.Height(m.finalOutput)
-	maxH := formH
-	if statusH > maxH {
-		maxH = statusH
-	}
-	if outputH > maxH {
-		maxH = outputH
+	maxH := max(outputH, max(statusH, formH))
+
+	// TODO: this is never displayed
+	completedBox := ""
+	if m.finalOutput != "" {
+		completedContent := s.StatusHeader.Render("Output Content") + "\n" + m.finalOutput
+		completedBox = s.Status.Width(maxWidth / 2).Render(completedContent)
 	}
 
-	statusBox := s.Status.Width(28).Height(maxH).Render(statusContent)
+	statusBox := s.Status.Width(60).Height(maxH).Render(statusContent)
 	if completedBox != "" {
-		completedBox = s.Status.Width(maxWidth).Height(maxH).Render(
+		completedBox = s.Status.Width(60).Height(maxH).Render(
 			s.StatusHeader.Render("Output") + "\n" + m.finalOutput,
 		)
 	}
@@ -311,7 +273,7 @@ func (m *Model) runOnCluster() {
 		c := fmt.Sprintf(command, cluster)
 		parts := strings.Fields(c)
 		cmd := exec.Command(parts[0], parts[1:]...)
-		out, err := cmd.CombinedOutput() // <-- CRUCIAL
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			errorHeader := m.styles.ErrorHeaderText.Render("Command failed")
 			m.finalOutput += fmt.Sprintf(
@@ -325,13 +287,13 @@ func (m *Model) runOnCluster() {
 			)
 			continue
 		}
-		// If it worked (or oc exists), you still show what's returned
+		// print output
 		m.finalOutput += fmt.Sprintf("Command OK for %s:\n%s\n", cluster, string(out))
 	}
 }
 
 func main() {
-	// configuration
+	// load configuration
 	configPath := flag.String("c", "config.yaml", "Path to config file")
 	flag.Parse()
 	if err := config.Load(*configPath); err != nil {

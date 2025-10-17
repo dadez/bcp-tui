@@ -15,24 +15,12 @@ clusters:
   - prod-cluster-4
   - prod-cluster-5
 
-actions:
-  # - grafana
-  # - cbcd-argocd
-  # - server-argocd
-  # - console
-  - browse
-  - command
-
-urls:
-  - name: browse grafana
-    url: "xdg-open https://grafana.%s.example.com"
-  - name: argocd
-    url: "xdg-open https://argocd.%s.example.com"
-  - name: console
-    url: "xdg-open https://console.%s.example.com"
-
 commands:
-  - name: console2
+  - name: browse grafana
+    command: "xdg-open https://grafana.%s.example.com"
+  - name: browse argocd
+    command: "xdg-open https://argocd.%s.example.com"
+  - name: browse console
     command: "xdg-open https://console.%s.example.com"
   - name: login
     command: "oc login %s -u username -p password"
