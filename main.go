@@ -16,7 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const maxWidth = 130
+const maxWidth = 135
 
 var (
 	red    = lipgloss.AdaptiveColor{Light: "#FE5F86", Dark: "#FE5F86"}
@@ -71,7 +71,7 @@ type Model struct {
 	lg          *lipgloss.Renderer
 	styles      *Styles
 	clusters    []string
-	command     string
+	commands    []string
 	form        *huh.Form
 	width       int
 	finalOutput string
@@ -122,16 +122,15 @@ func NewModel() Model {
 				Filterable(true).
 				Value(&m.clusters),
 
-			huh.NewSelect[string]().
+			huh.NewMultiSelect[string]().
 				Key("command").
-				Value(&m.command).
+				Value(&m.commands).
 				Options(commandsOpts...).
 				Title("Choose your action").
 				Description("This will determine the action"),
 		),
 	).
 		WithWidth(45).
-		// INFO: not sure what thid does
 		WithShowHelp(true).
 		WithKeyMap(customKeyMap()).
 		WithShowErrors(true)
@@ -171,7 +170,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Trigger action on Enter
 		case "enter":
-			if m.form.Get("command") != nil {
+			// Capture selected commands
+			if raw := m.form.Get("command"); raw != nil {
+				if c, ok := raw.([]string); ok {
+					m.commands = c
+				}
 				// Capture selected clusters
 				if raw := m.form.Get("cluster"); raw != nil {
 					if v, ok := raw.([]string); ok {
@@ -200,16 +203,22 @@ func (m Model) View() string {
 	form := m.lg.NewStyle().Margin(1, 0).Render(formView)
 
 	// 2. Middle status (always visible)
-	var selected string
+	var selectedCluster string
 	if raw := m.form.Get("cluster"); raw != nil {
 		if v, ok := raw.([]string); ok {
-			selected = strings.Join(v, "  \n")
+			selectedCluster = strings.Join(v, "  \n")
 		}
 	}
-	command := m.form.GetString("command")
+
+	var selectedCommand string
+	if raw := m.form.Get("command"); raw != nil {
+		if v, ok := raw.([]string); ok {
+			selectedCommand = strings.Join(v, "  \n")
+		}
+	}
 
 	statusContent := s.StatusHeader.Render(
-		"Build") + "\n" + "Cluster(s):" + "\n" + selected + "\n\n" + "Command:" + "\n" + command
+		"Build") + "\n" + "Cluster(s):" + "\n" + selectedCluster + "\n\n" + "Command(s):" + "\n" + selectedCommand
 
 	// 3. Right-side completed output (only shown on output)
 
@@ -286,29 +295,31 @@ func (m Model) appErrorBoundaryView(text string) string {
 }
 
 func (m *Model) runOnCluster() {
-	command := m.form.GetString("command")
+	// command := m.form.GetString("command")
 	m.finalOutput = ""
 
 	for _, cluster := range m.clusters {
-		c := fmt.Sprintf(command, cluster)
-		parts := strings.Fields(c)
-		cmd := exec.Command(parts[0], parts[1:]...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			errorHeader := m.styles.ErrorHeaderText.Render("Command failed")
-			m.finalOutput += fmt.Sprintf(
-				"%s\n Failed to run command %s with args %s for cluster %s:\n%s\nError: %v\n\n",
-				errorHeader,
-				cmd.Path,
-				cmd.Args,
-				cluster,
-				string(out),
-				err,
-			)
-			continue
+		for _, command := range m.commands {
+			c := fmt.Sprintf(command, cluster)
+			parts := strings.Fields(c)
+			cmd := exec.Command(parts[0], parts[1:]...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				errorHeader := m.styles.ErrorHeaderText.Render("Command failed")
+				m.finalOutput += fmt.Sprintf(
+					"%s\n Failed to run command %s with args %s for cluster %s:\n%s\nError: %v\n\n",
+					errorHeader,
+					cmd.Path,
+					cmd.Args,
+					cluster,
+					string(out),
+					err,
+				)
+				continue
+			}
+			// print output
+			m.finalOutput += fmt.Sprintf("Command OK for %s:\n%s\n", cluster, string(out))
 		}
-		// print output
-		m.finalOutput += fmt.Sprintf("Command OK for %s:\n%s\n", cluster, string(out))
 	}
 }
 
