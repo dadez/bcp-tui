@@ -11,6 +11,7 @@ import (
 	"github/dadez/bcp-tui/config"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -75,12 +76,14 @@ type Model struct {
 	form        *huh.Form
 	width       int
 	finalOutput string
+	spinner     spinner.Model
+	spinning    bool
 }
 
 func customKeyMap() *huh.KeyMap {
 	km := huh.NewDefaultKeyMap() // gives you the default keymap struct
 
-	// Override only SelectAll for MultiSelect → Shift+A
+	// Override SelectAll for MultiSelect → Shift+A
 	km.MultiSelect.SelectAll = key.NewBinding(
 		key.WithKeys("A"), // Shift+A
 		key.WithHelp("shift+a", "select all"),
@@ -138,11 +141,18 @@ func NewModel() Model {
 		WithKeyMap(customKeyMap()).
 		WithShowErrors(true)
 
+	m.spinner = spinner.New()
+	m.spinner.Spinner = spinner.Jump
+	m.spinning = true
+
 	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.form.Init()
+	return tea.Batch(
+		m.form.Init(),
+		m.spinner.Tick,
+	)
 }
 
 func min(x, y int) int {
@@ -153,6 +163,15 @@ func min(x, y int) int {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	// update spinner
+	if m.spinning {
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
 	switch msg := msg.(type) {
 
 	// Handle window resizing
@@ -191,11 +210,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Continue form updates
-	form, cmd := m.form.Update(msg)
+	form, formCmd := m.form.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
 		m.form = f
 	}
-	return m, cmd
+	cmds = append(cmds, formCmd)
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) View() string {
@@ -220,8 +240,12 @@ func (m Model) View() string {
 		}
 	}
 
+	spinView := ""
+	if m.spinning {
+		spinView = m.spinner.View()
+	}
 	statusContent := s.StatusHeader.Render(
-		"Build") + "\n" + "Cluster(s):" + "\n" + selectedCluster + "\n\n" + "Command(s):" + "\n" + selectedCommand
+		"Build") + "  " + spinView + "\n" + "Cluster(s):" + "\n" + selectedCluster + "\n\n" + "Command(s):" + "\n" + selectedCommand
 
 	// 3. Right-side completed output (only shown on output)
 
@@ -375,6 +399,8 @@ func (m *Model) runOnCluster() {
 				)
 				continue
 			}
+
+			m.spinning = false
 
 			m.finalOutput += fmt.Sprintf("Command OK for %s:\n%s\n", cluster, string(out))
 		}
