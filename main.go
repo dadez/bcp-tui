@@ -295,29 +295,61 @@ func (m Model) appErrorBoundaryView(text string) string {
 }
 
 func (m *Model) runOnCluster() {
-	// command := m.form.GetString("command")
 	m.finalOutput = ""
 
+	// Validate that every command contains at least one "%s"
+	for _, cmdTemplate := range m.commands {
+		placeholderIndex := strings.Index(cmdTemplate, "%s")
+
+		// 1) Must contain %s
+		if placeholderIndex == -1 {
+			m.finalOutput += fmt.Sprintf(
+				"Invalid command template: %q (missing %%s placeholder)\n",
+				cmdTemplate,
+			)
+			return
+		}
+
+		// 2) Must NOT start with %s
+		if placeholderIndex == 0 {
+			m.finalOutput += fmt.Sprintf(
+				"Invalid command template: %q (%%s cannot be the first token)\n",
+				cmdTemplate,
+			)
+			return
+		}
+	}
+
 	for _, cluster := range m.clusters {
-		for _, command := range m.commands {
-			c := fmt.Sprintf(command, cluster)
-			parts := strings.Fields(c)
+		for _, cmdTemplate := range m.commands {
+			// Safe because of validation above
+			fullCmd := fmt.Sprintf(cmdTemplate, cluster)
+			parts := strings.Fields(fullCmd)
+
+			if len(parts) < 2 { // binary + cluster
+				m.finalOutput += fmt.Sprintf(
+					"Invalid expanded command for cluster %s: %q (insufficient args)\n",
+					cluster,
+					fullCmd,
+				)
+				continue
+			}
+
 			cmd := exec.Command(parts[0], parts[1:]...)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				errorHeader := m.styles.ErrorHeaderText.Render("Command failed")
 				m.finalOutput += fmt.Sprintf(
-					"%s\n Failed to run command %s with args %s for cluster %s:\n%s\nError: %v\n\n",
+					"%s\nFailed to run command %q for cluster %s:\n%s\nError: %v\n\n",
 					errorHeader,
-					cmd.Path,
-					cmd.Args,
+					parts,
 					cluster,
 					string(out),
 					err,
 				)
 				continue
 			}
-			// print output
+
 			m.finalOutput += fmt.Sprintf("Command OK for %s:\n%s\n", cluster, string(out))
 		}
 	}
