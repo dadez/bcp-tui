@@ -112,6 +112,9 @@ func NewModel() Model {
 		commandsOpts = append(commandsOpts, huh.NewOption(command.Name, command.Command))
 	}
 
+	// add a custom command
+	commandsOpts = append(commandsOpts, huh.NewOption("Custom command", "custom"))
+
 	m.form = huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
@@ -296,6 +299,29 @@ func (m Model) appErrorBoundaryView(text string) string {
 
 func (m *Model) runOnCluster() {
 	m.finalOutput = ""
+
+	// Check if user selected the custom option
+	for i, cmdTemplate := range m.commands {
+		if cmdTemplate == "custom" {
+			var customInput string
+
+			// Prompt user for the actual command
+			prompt := huh.NewInput().
+				Title("Enter your custom command").
+				Description("You must use %s somewhere to insert the cluster name").
+				Placeholder("e.g. kubectl get pods -n %s").
+				Value(&customInput)
+
+			// Run the prompt immediately
+			if err := prompt.Run(); err != nil {
+				m.finalOutput += fmt.Sprintf("Custom command input canceled: %v\n", err)
+				return
+			}
+
+			// Replace the placeholder in the user’s selections
+			m.commands[i] = customInput
+		}
+	}
 
 	// Validate that every command contains at least one "%s"
 	for _, cmdTemplate := range m.commands {
