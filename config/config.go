@@ -9,16 +9,9 @@ type Commands struct {
 	Command string `mapstructure:"command"`
 }
 
-type credentials struct {
-	Username     string `mapstructure:"username"`
-	Gopass       string `mapstructure:"username"`
-	PassowrdPath string `mapstructure:"passowrdPath"`
-}
-
 type Config struct {
-	Clusters    Clusters    `mapstructure:"clusters"`
-	Commands    []Commands  `mapstructure:"commands"`
-	credentials credentials `mapstructure:"credentials"`
+	Clusters Clusters   `mapstructure:"clusters"`
+	Commands []Commands `mapstructure:"commands"`
 }
 
 // AppConfig exported package-level variable

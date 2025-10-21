@@ -28,8 +28,3 @@ commands:
     command: "echo command on cluster %s"
   - name: "list"
     command: "ls %s"
-
-credentials:
-  username: myuser
-  gopass: true
-  passowrdPath: "/path/to/password"
