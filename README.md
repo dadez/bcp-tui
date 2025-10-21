@@ -1,6 +1,10 @@
 # bcp-tui
 
-This is a project with aim of improve the productivity in my daily work. Thanks to sofa, I have great path to open a link or run a command.
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dadez/bcp-tui/go-ossf-slsa3-publish.yml?branch=main)
+![GitHub top language](https://img.shields.io/github/languages/top/dadez/bcp-tui)
+
+This is a project with aim of improve the productivity in my daily work. Thanks to [sofa](https://github.com/dadez/sofa) (kudos to
+[f4z3r](https://github.com/f4z3r/)), I have great path to open a link or run a command.
 The goal here is mostly to iterate over a list of targets like clusters for open a web link like argocd or run a command like login.
 
 ## todo
