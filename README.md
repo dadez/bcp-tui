@@ -3,10 +3,16 @@
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dadez/bcp-tui/go-ossf-slsa3-publish.yml?branch=main)
 ![GitHub top language](https://img.shields.io/github/languages/top/dadez/bcp-tui)
 
-This is a project with aim of improve the productivity in my daily work. Thanks to [sofa](https://github.com/dadez/sofa) (kudos to
-[f4z3r](https://github.com/f4z3r/)), I have great path to open a link or run a command.
+## Overview
 
-The goal here is to iterate over a list of targets like clusters for run command, e.g. open an html webpage.
+This is a project build with [huh](https://github.com/charmbracelet/huh) to enhance productivity in my daily workflow.
+It serves as a complement to [sofa](https://github.com/dadez/sofa) providing an efficient way to open links and execute commands directly from a streamlined interface.
+
+## Usage
+
+The goal here is to iterate over a list of targets like clusters for run command(s), e.g. open an html webpage or a shell command like the echo bellow.
+
+![sample echo command](./assets/echo.gif)
 
 ## Configuration
 
@@ -29,3 +35,8 @@ go run ./main.go -c /tmp/config.josn
 - [ ] esc goes back, do not close
 - [x] allow run custom command (prompt)
 - [ ] add tests
+
+## Tooling
+
+- [asciinema](https://github.com/asciinema/asciinema) for record the terminal demo
+- [agg](https://github.com/asciinema/agg/) for convert asciinema cast file to gif
