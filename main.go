@@ -14,7 +14,7 @@ import (
 
 func main() {
 	// load configuration
-	configPath := flag.String("c", "config.yaml", "Path to config file")
+	configPath := flag.String("c", "", "Path to config file")
 	flag.Parse()
 	if err := config.Load(*configPath); err != nil {
 		log.Fatal(err)

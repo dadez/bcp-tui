@@ -13,6 +13,3 @@ type Config struct {
 	Clusters Clusters   `mapstructure:"clusters"`
 	Commands []Commands `mapstructure:"commands"`
 }
-
-// AppConfig exported package-level variable
-var AppConfig *Config
