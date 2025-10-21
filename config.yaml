@@ -24,10 +24,10 @@ commands:
     command: "xdg-open https://console.%s.example.com"
   - name: login
     command: "oc login %s -u username -p password"
-  - name: echologin
-    command: "echo oc login %s -u username -p password"
-  - name: "list postgres clusters"
-    command: "oc get postgresclusters -A"
+  - name: echo
+    command: "echo command on cluster %s"
+  - name: "list"
+    command: "ls %s"
 
 credentials:
   username: myuser
